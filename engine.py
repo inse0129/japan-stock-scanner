@@ -8,30 +8,48 @@ import jpholiday
 # 1. API 플랜 검증 로직 (J-Quants V2 완벽 호환)
 # ==========================================
 def verify_jquants_plan(api_key):
-    """V2 API: x-api-key 헤더를 사용하여 과거 데이터를 찔러봅니다."""
+    """V2 API: 데이터 존재 여부를 더 엄격하게 체크하여 플랜을 판별합니다."""
     url = "https://api.jquants.com/v2/equities/bars/daily"
-    headers = {"x-api-key": api_key} # 🎯 V2 전용 헤더!
+    headers = {"x-api-key": api_key}
     
-    def check_past_date(days_ago):
+    def is_data_accessible(days_ago):
+        # 특정 시점의 토요타(72030) 데이터를 찔러봄
         target_date = (datetime.now() - timedelta(days=days_ago)).strftime('%Y%m%d')
-        params = {"code": "72030", "date": target_date} # 토요타(72030)로 테스트
+        params = {"code": "72030", "date": target_date}
         try:
             res = requests.get(url, headers=headers, params=params, timeout=5)
             if res.status_code == 200:
-                # 데이터가 비어있지 않으면 권한 있음!
                 data = res.json().get("data", [])
-                return len(data) > 0
+                # 🎯 핵심 수정: 리스트가 비어있지 않고, 실제 주가 정보가 들어있어야 '권한 있음'으로 간주
+                return len(data) > 0 and "C" in data[0] 
             return False
         except:
             return False
 
-    if not check_past_date(180): return {"plan": "Free", "max_cost": 3, "message": "단기/급등 스캐너 무료 제공"}
-    time.sleep(0.1)
-    if not check_past_date(365 * 6): return {"plan": "Light", "max_cost": 20, "message": "기본 스윙 조건식 개방"}
-    time.sleep(0.1)
-    if not check_past_date(365 * 11): return {"plan": "Standard", "max_cost": 100, "message": "HTS급 강력한 스윙 조건식 개방"}
-    return {"plan": "Premium", "max_cost": 450, "message": "제한 없는 무제한 딥스캔 활성화"}
+    # 1단계: 6개월 전 테스트 (무료 유저는 여기서 True가 나와야 함, 유료 유저는 당연히 True)
+    # 만약 여기서 False가 나오면 키 자체가 잘못되었거나 시스템 오류입니다.
+    if not is_data_accessible(180):
+        # 💡 반대로, 오늘(최신) 데이터를 찔러서 안 나오면 무조건 Free입니다.
+        if not is_data_accessible(1): 
+            return {"plan": "Free", "max_cost": 3, "message": "단기/급등 스캐너 무료 제공 (12주 전 데이터 기준)"}
+        return {"plan": "Unknown", "max_cost": 0, "message": "키 검증 실패"}
 
+    # 2단계: 6년 전 테스트 (무료는 2년까지만 주므로 여기서 무조건 False가 나와야 함)
+    time.sleep(0.1)
+    if not is_data_accessible(365 * 6):
+        return {"plan": "Free", "max_cost": 3, "message": "단기/급등 스캐너 무료 제공 (12주 전 데이터 기준)"}
+        
+    # 3단계: 11년 전 테스트 (Light는 5년까지만 주므로 여기서 False)
+    time.sleep(0.1)
+    if not is_data_accessible(365 * 11):
+        return {"plan": "Light", "max_cost": 20, "message": "기본 스윙 조건식 개방"}
+        
+    # 4단계: Standard 판별
+    time.sleep(0.1)
+    if not is_data_accessible(365 * 21):
+        return {"plan": "Standard", "max_cost": 100, "message": "HTS급 강력한 스윙 조건식 개방"}
+        
+    return {"plan": "Premium", "max_cost": 450, "message": "제한 없는 무제한 딥스캔 활성화"}
 
 # ==========================================
 # 2. 데이터 수집기 (V2 전용)
