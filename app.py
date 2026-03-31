@@ -39,17 +39,20 @@ if not st.session_state.is_verified:
     if st.button("🚀 API 연동 및 플랜 스캔", use_container_width=True):
         if user_api_key:
             with st.spinner("J-Quants 서버와 통신하며 권한(Plan)을 판독 중입니다..."):
-                # 폭포수 검증 로직 실행 (engine.py 호출)
                 result = engine.verify_jquants_plan(user_api_key)
                 
-                # 검증 결과를 세션에 저장
-                st.session_state.plan = result["plan"]
-                st.session_state.max_cost = result["max_cost"]
-                st.session_state.message = result["message"]
-                st.session_state.api_key = user_api_key
-                st.session_state.is_verified = True
-                
-                st.rerun() # 화면 새로고침하여 대시보드 진입
+                # 🎯 변경된 부분: Invalid(유효하지 않은 키) 처리 로직 추가
+                if result["plan"] == "Invalid":
+                    st.error(result["message"])
+                else:
+                    # 검증 결과를 세션에 저장
+                    st.session_state.plan = result["plan"]
+                    st.session_state.max_cost = result["max_cost"]
+                    st.session_state.message = result["message"]
+                    st.session_state.api_key = user_api_key
+                    st.session_state.is_verified = True
+                    
+                    st.rerun() # 화면 새로고침하여 대시보드 진입
         else:
             st.warning("API 키를 먼저 입력해 주세요!")
 
