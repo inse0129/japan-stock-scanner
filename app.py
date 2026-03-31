@@ -112,15 +112,23 @@ else:
     # 코스트를 초과했거나 조건을 하나도 선택하지 않으면 버튼 비활성화
     btn_disabled = is_over_cost or current_cost == 0
     
+  # app.py 의 버튼 실행 부분 교체
     if st.button("🎯 조건 검색 실행!", type="primary", use_container_width=True, disabled=btn_disabled):
-        with st.spinner("J-Quants에서 데이터를 가져와 분석 중입니다... (10초 컷 스캔)"):
+        with st.spinner("J-Quants에서 데이터를 가져와 분석 중입니다... (최초 실행 시 약 5초 소요)"):
             
-            # 🔥 방금 만든 진짜 엔진 가동!
-            result_df = engine.run_scanner(
+            # engine.py 호출 시 plan 변수를 추가로 넘겨줍니다.
+            result_df, target_date = engine.run_scanner(
                 st.session_state.api_key, 
+                st.session_state.plan, # 플랜 정보 전달!
                 cond1, cond2, cond3, 
                 st.session_state["ohlcv_cache"]
             )
             
-            st.success(f"분석 완료! 총 {len(result_df)}개의 종목이 검색되었습니다.")
+            # 검색 완료 메시지 및 UX 최적화 알림
+            if st.session_state.plan == "Free":
+                st.info(f"💡 **Free 플랜 안내:** J-Quants 정책에 따라 가장 최신으로 열람 가능한 **{target_date[:4]}년 {target_date[4:6]}월 {target_date[6:]}일** 데이터를 기준으로 스캔했습니다. (최신 데이터를 원하시면 요금제를 업그레이드하세요!)")
+            else:
+                st.success(f"분석 완료! (기준일: {target_date[:4]}-{target_date[4:6]}-{target_date[6:]})")
+                
+            st.markdown(f"**총 {len(result_df)}개의 종목이 검색되었습니다.**")
             st.dataframe(result_df, use_container_width=True, hide_index=True)
