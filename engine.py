@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import time
 import jpholiday
-import jquantsapi  # 🎯 대표님의 픽! 공식 라이브러리로 복귀!
+import requests  # 🎯 대표님의 픽! 공식 라이브러리로 복귀!
 
 # ==========================================
 # 1. API 플랜 검증 로직 (폭포수 찌르기)
