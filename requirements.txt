@@ -2,4 +2,3 @@ streamlit
 pandas
 requests
 jpholiday
-jquants-api-client
