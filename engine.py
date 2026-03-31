@@ -3,30 +3,46 @@ from datetime import datetime, timedelta
 import time
 import jpholiday
 import requests
-import jquantsapi  # 🎯 필수! jquantsapi 라이브러리 임포트 추가!
 
 # ==========================================
-# 1. API 플랜 검증 로직 (폭포수 찌르기 수정됨)
+# 0. API 토큰 발급 헬퍼 (New!)
 # ==========================================
-def verify_jquants_plan(api_key):
-    """jquantsapi 클라이언트를 이용해 토큰 갱신과 권한 스캔을 완벽하게 처리합니다."""
-    try:
-        # 1단계: API 키 유효성 자체를 먼저 검증합니다.
-        cli = jquantsapi.Client(refresh_token=api_key)
-        cli.get_id_token() # 키가 틀렸다면 여기서 에러가 발생합니다.
-    except Exception as e:
-        return {"plan": "Invalid", "max_cost": 0, "message": "API 키가 유효하지 않거나 만료되었습니다. 다시 확인해주세요!"}
+def get_id_token(refresh_token):
+    """리프레시 토큰을 사용해 J-Quants API의 임시 통행증(ID Token)을 직접 발급받습니다."""
+    url = f"https://api.jquants.com/v1/token/auth_refresh?refreshtoken={refresh_token}"
+    res = requests.post(url)
+    if res.status_code == 200:
+        return res.json().get("idToken")
+    return None
+
+# ==========================================
+# 1. API 플랜 검증 로직 (폭포수 찌르기 - requests 버전)
+# ==========================================
+def verify_jquants_plan(refresh_token):
+    # 1단계: API 키(리프레시 토큰) 유효성 검증
+    id_token = get_id_token(refresh_token)
+    
+    if not id_token:
+        return {"plan": "Invalid", "max_cost": 0, "message": "API 키(Refresh Token)가 만료되었습니다. J-Quants 홈페이지에서 새로 발급(Get Refresh Token) 받아주세요!"}
+
+    headers = {"Authorization": f"Bearer {id_token}"}
 
     def check_past_date(days_ago):
         target_date = (datetime.now() - timedelta(days=days_ago)).strftime('%Y%m%d')
+        # 토요타(72030) 종목만 찔러서 과거 데이터 권한 테스트
+        url = f"https://api.jquants.com/v1/prices/daily_quotes?code=72030&date={target_date}"
         try:
-            # 토요타(72030) 종목만 찔러서 해당 과거 데이터에 접근 가능한지 권한 테스트
-            df = cli.get_prices_daily_quotes(code="72030", date_yyyymmdd=target_date)
-            return not df.empty
+            r = requests.get(url, headers=headers)
+            if r.status_code == 200:
+                data = r.json()
+                # 데이터가 존재하면 권한이 있는 것
+                if "daily_quotes" in data and len(data["daily_quotes"]) > 0:
+                    return True
+            return False
         except:
             return False
 
-    # 2단계: 과거 데이터 권한으로 플랜을 역추적합니다. (가장 긴 기간부터 확인)
+    # 2단계: 과거 데이터 권한으로 플랜을 역추적합니다.
     if check_past_date(365 * 11): 
         return {"plan": "Standard", "max_cost": 100, "message": "HTS급 강력한 스윙 조건식 개방"}
     time.sleep(0.1)
@@ -37,7 +53,6 @@ def verify_jquants_plan(api_key):
     # 키는 유효하지만 과거 데이터 접근이 제한적이라면 Free 플랜입니다.
     return {"plan": "Free", "max_cost": 3, "message": "단기/급등 스캐너 무료 제공"}
 
-
 # ==========================================
 # 2. 데이터 수집기 (마스터 트레이딩 캘린더 탑재)
 # ==========================================
@@ -45,7 +60,6 @@ def get_recent_trading_days(n_days, base_date=None):
     if base_date is None:
         base_date = datetime.now()
         
-    # J-Quants 데이터 배포 시간(17시) 고려
     if base_date.date() == datetime.now().date() and datetime.now().hour < 17:
         base_date -= timedelta(days=1)
         
@@ -53,25 +67,31 @@ def get_recent_trading_days(n_days, base_date=None):
     current_date = base_date
     
     while len(dates) < n_days:
-        # 주말(토,일) 제외 AND 일본 공휴일(jpholiday) 완벽 제외
         if current_date.weekday() < 5 and not jpholiday.is_holiday(current_date):
             dates.append(current_date.strftime('%Y%m%d'))
         current_date -= timedelta(days=1)
         
     return dates
 
-def fetch_daily_market(cli, date_str, cache_dict):
-    """jquantsapi를 사용해 특정 날짜의 전종목 주가를 수집하고 캐싱합니다."""
+def fetch_daily_market(id_token, date_str, cache_dict):
+    """requests를 사용해 특정 날짜의 전종목 주가를 수집하고 캐싱합니다."""
     if date_str in cache_dict:
         return cache_dict[date_str]
         
+    headers = {"Authorization": f"Bearer {id_token}"}
+    url = f"https://api.jquants.com/v1/prices/daily_quotes?date={date_str}"
+    
     try:
-        # code 파라미터 없이 날짜만 넣으면 전종목 4000개가 한방에 반환됩니다.
-        df = cli.get_prices_daily_quotes(date_yyyymmdd=date_str)
-        if df is None or df.empty:
+        r = requests.get(url, headers=headers)
+        if r.status_code != 200:
             return pd.DataFrame()
             
-        # 연산을 위해 숫자로 변환
+        data = r.json()
+        if "daily_quotes" not in data or not data["daily_quotes"]:
+            return pd.DataFrame()
+            
+        df = pd.DataFrame(data["daily_quotes"])
+            
         numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume', 'TurnoverValue']
         for col in numeric_cols:
             if col in df.columns:
@@ -82,14 +102,16 @@ def fetch_daily_market(cli, date_str, cache_dict):
     except Exception as e:
         return pd.DataFrame()
 
-
 # ==========================================
 # 3. 🚀 스캐너 엔진 (타임머신 및 지퍼 채우기 로직)
 # ==========================================
-def run_scanner(api_key, plan, cond1_active, cond2_active, cond3_active, cache_dict):
-    cli = jquantsapi.Client(refresh_token=api_key)
-    
-    # 플랜별 타임머신 로직 (Free 플랜 에러 방지를 위해 90일 전으로 안전하게 이동)
+def run_scanner(refresh_token, plan, cond1_active, cond2_active, cond3_active, cache_dict):
+    # 스캔 시작 전 쌩쌩한 통행증(ID Token) 발급
+    id_token = get_id_token(refresh_token)
+    if not id_token:
+        return pd.DataFrame(), "토큰 발급 실패"
+        
+    # 플랜별 타임머신 로직 
     if plan == "Free":
         safe_free_date = datetime.now() - timedelta(days=90)
         past_trading_days = get_recent_trading_days(2, base_date=safe_free_date) 
@@ -97,15 +119,14 @@ def run_scanner(api_key, plan, cond1_active, cond2_active, cond3_active, cache_d
         yest_str = past_trading_days[1]
         target_date_for_ui = today_str
     else:
-        # 유료 유저는 최신 2일치
         trading_days = get_recent_trading_days(2) 
         today_str = trading_days[0]
         yest_str = trading_days[1]
         target_date_for_ui = today_str
 
     # 데이터 호출
-    df_today = fetch_daily_market(cli, today_str, cache_dict)
-    df_yest = fetch_daily_market(cli, yest_str, cache_dict)
+    df_today = fetch_daily_market(id_token, today_str, cache_dict)
+    df_yest = fetch_daily_market(id_token, yest_str, cache_dict)
     
     if df_today.empty or df_yest.empty:
         return pd.DataFrame(), target_date_for_ui
@@ -114,23 +135,19 @@ def run_scanner(api_key, plan, cond1_active, cond2_active, cond3_active, cache_d
     df_merged = pd.merge(df_today, df_yest, on='Code', suffixes=('_today', '_yest'))
     mask = pd.Series(True, index=df_merged.index)
     
-    # 조건 1: 양봉 마감
     if cond1_active:
         if 'Close_today' in df_merged.columns and 'Open_today' in df_merged.columns:
             mask = mask & (df_merged['Close_today'] > df_merged['Open_today'])
         
-    # 조건 2: 전일 대비 거래대금 500% 이상
     if cond2_active:
         if 'TurnoverValue_today' in df_merged.columns and 'TurnoverValue_yest' in df_merged.columns:
             mask = mask & (df_merged['TurnoverValue_today'] >= (df_merged['TurnoverValue_yest'] * 5))
             
-    # 조건 3: 20일 이평선 돌파 (PRO 유저용, 차후 개발)
     if cond3_active:
         pass 
         
     final_result = df_merged[mask]
     
-    # 화면 출력용 깔끔한 표 정리
     cols_to_show = ['Code', 'Close_today', 'Volume_today', 'TurnoverValue_today']
     display_df = final_result[[c for c in cols_to_show if c in final_result.columns]].copy()
     
