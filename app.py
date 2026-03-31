@@ -7,7 +7,8 @@ st.set_page_config(page_title="일본 증권주 조건검색", layout="centered"
 st.title("📈 일본 증권주 조건검색 (MVP)")
 st.markdown("""
 **J-Quants API**를 활용하여 일본 증권사 종목 중 설정한 조건에 맞는 종목을 찾아냅니다.
-💡 **스윙 / 중장기 투자자를 위한 패턴 검색기입니다.** *(무료 API 정책상 최근 12주 이전의 데이터를 기반으로 과거의 유의미한 패턴을 탐색합니다.)*
+💡 **알림:** 입력하신 키(무료/유료)를 자동 감지하여 최적의 데이터를 제공합니다. 
+*(첫 검색 시 대규모 데이터를 가져오느라 약 10~20초가 소요되며, 이후 검색은 0.1초 만에 즉시 완료됩니다!)*
 """)
 
 st.divider()
@@ -30,7 +31,8 @@ if st.button("🚀 검색 실행", type="primary", use_container_width=True):
     if not api_key:
         st.warning("⚠️ J-Quants API Refresh Token을 먼저 입력해주세요.")
     else:
-        with st.spinner("서버에서 대규모 데이터를 일괄 수집하여 분석하고 있습니다. 잠시만 기다려주세요..."):
+        # 로딩 스피너 문구 적용
+        with st.spinner("서버에서 데이터를 확인 중입니다... (최초 1회는 시간이 조금 소요됩니다)"):
             result_df = run_search(
                 api_key=api_key, 
                 n_days=n_days, 
@@ -47,7 +49,7 @@ if st.button("🚀 검색 실행", type="primary", use_container_width=True):
             elif result_df.empty:
                 st.info("조건에 맞는 종목이 없습니다. 조건을 완화하여 다시 검색해보세요.")
             else:
-                st.success(f"총 {len(result_df)}개의 종목이 검색되었습니다!")
+                st.success(f"총 {len(result_df)}개의 종목이 검색되었습니다! (발생일자 기준)")
                 st.dataframe(
                     result_df,
                     hide_index=True,
