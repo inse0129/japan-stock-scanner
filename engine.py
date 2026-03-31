@@ -31,17 +31,18 @@ def verify_jquants_plan(api_key):
 # ==========================================
 # 2. 데이터 수집기 (세션 캐시 적용 완료!)
 # ==========================================
-def get_recent_trading_days(n_days):
-    """최근 영업일(주말 제외) N일의 날짜 리스트를 'YYYYMMDD' 형태로 반환 (공휴일은 단순화)"""
+def get_recent_trading_days(n_days, base_date=None):
+    """플랜에 따른 기준일(base_date)부터 과거 영업일 N개를 구합니다."""
+    if base_date is None:
+        base_date = datetime.now()
+        
     dates = []
-    days_subtracted = 0
-    current_date = datetime.now()
+    current_date = base_date
     
     while len(dates) < n_days:
-        if current_date.weekday() < 5: # 0~4는 월~금
+        if current_date.weekday() < 5: # 주말 제외
             dates.append(current_date.strftime('%Y%m%d'))
         current_date -= timedelta(days=1)
-        days_subtracted += 1
     return dates
 
 def fetch_daily_market(api_key, date_str, cache_dict):
@@ -78,53 +79,46 @@ def fetch_daily_market(api_key, date_str, cache_dict):
 # ==========================================
 # 3. 🚀 스캐너 엔진 (지퍼 채우기 및 판다스 벡터 연산)
 # ==========================================
-def run_scanner(api_key, cond1_active, cond2_active, cond3_active, cache_dict):
-    """
-    유저가 선택한 조건에 따라 데이터를 조립하고 판별하는 핵심 함수입니다.
-    """
-    # 1. 필요 날짜 계산
-    trading_days = get_recent_trading_days(2) # 오늘(D-0), 어제(D-1) 날짜 확보
+# 기존 run_scanner 함수를 아래로 교체 (매개변수에 plan 추가!)
+def run_scanner(api_key, plan, cond1_active, cond2_active, cond3_active, cache_dict):
+    """플랜을 인식하여 기준일을 자동으로 맞추고 검색을 수행합니다."""
+    
+    # 🕰️ 핵심: 플랜별 타임머신 로직
+    if plan == "Free":
+        # 무료 플랜은 J-Quants 정책상 12주(84일) 전이 가장 '최신' 데이터입니다.
+        target_base_date = datetime.now() - timedelta(days=84)
+    else:
+        # 유료 플랜은 오늘을 기준으로 합니다.
+        target_base_date = datetime.now()
+
+    # 타겟 기준일로부터 2일치 영업일 추출
+    trading_days = get_recent_trading_days(2, base_date=target_base_date) 
     today_str = trading_days[0]
     yest_str = trading_days[1]
     
-    # 2. 데이터 수집 (캐시가 있으면 0.01초 컷)
     df_today = fetch_daily_market(api_key, today_str, cache_dict)
     df_yest = fetch_daily_market(api_key, yest_str, cache_dict)
     
+    # 빈 데이터 방어 (휴일 등으로 못 가져왔을 때)
     if df_today.empty or df_yest.empty:
-        return pd.DataFrame() # 휴일 등으로 데이터가 없을 경우 방어 코드
+        return pd.DataFrame(), today_str # 기준일 문자열도 함께 반환
         
-    # 3. 🔗 지퍼 채우기 마법 (Merge)
-    # 오늘 데이터와 어제 데이터를 'Code(종목코드)' 기준으로 가로로 쫙 이어 붙입니다.
-    # 이렇게 하면 하나의 표 안에 어제 종가(Close_yest)와 오늘 거래대금(TurnoverValue_today)이 공존하게 됩니다!
+    # 지퍼 채우기 (Merge)
     df_merged = pd.merge(df_today, df_yest, on='Code', suffixes=('_today', '_yest'))
     
-    # 4. 🎯 조건 필터링 (Pandas Vectorization - for문 없이 4000개를 한 번에 검사)
-    # 기본값: 모든 종목이 True인 상태에서, 조건에 안 맞는 것을 쳐냅니다.
     mask = pd.Series(True, index=df_merged.index)
     
     if cond1_active:
-        # 조건 1: 당일 양봉 (종가가 시가보다 큼)
         mask = mask & (df_merged['Close_today'] > df_merged['Open_today'])
         
     if cond2_active:
-        # 조건 2: 전일 대비 거래대금 500% (5배) 이상 터짐
         mask = mask & (df_merged['TurnoverValue_today'] >= (df_merged['TurnoverValue_yest'] * 5))
         
-    if cond3_active:
-        # 조건 3: 20일 이동평균선 돌파 (가이드용)
-        # ※ 실제 20일 이평을 구하려면 df를 20일치 가져와서 rolling()을 써야 하지만, 
-        # API 한도 보호를 위해 여기서는 시뮬레이션용 임시 로직을 넣거나 에러 처리를 합니다.
-        pass 
-        
-    # 5. 조건에 맞는 종목만 필터링
     final_result = df_merged[mask]
     
-    # 6. 유저에게 보여줄 깔끔한 표 형태로 다듬기
     display_df = final_result[['Code', 'Close_today', 'Volume_today', 'TurnoverValue_today']].copy()
     display_df.columns = ['종목코드', '현재가(엔)', '당일 거래량', '거래대금(엔)']
-    
-    # 거래대금 기준으로 내림차순 정렬 (시장의 주도주부터 보여줌)
     display_df = display_df.sort_values(by='거래대금(엔)', ascending=False)
     
-    return display_df
+    # 💡 화면에 띄워줄 '실제 검색된 기준일(today_str)'도 같이 넘겨줍니다!
+    return display_df, today_str
