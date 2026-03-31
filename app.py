@@ -115,16 +115,12 @@ else:
     if st.button("🎯 조건 검색 실행!", type="primary", use_container_width=True, disabled=btn_disabled):
         with st.spinner("J-Quants에서 데이터를 가져와 분석 중입니다... (10초 컷 스캔)"):
             
-            # TODO: 여기에 engine.py의 실제 검색 로직(fetch & calculate)이 들어갑니다.
-            # 예시: engine.run_scanner(st.session_state.api_key, cond1, cond2, cond3, st.session_state["ohlcv_cache"])
-            time.sleep(2) # 검색 시뮬레이션 대기
+            # 🔥 방금 만든 진짜 엔진 가동!
+            result_df = engine.run_scanner(
+                st.session_state.api_key, 
+                cond1, cond2, cond3, 
+                st.session_state["ohlcv_cache"]
+            )
             
-            # 가상의 결과 데이터 출력
-            st.success("분석 완료! 총 3개의 종목이 검색되었습니다.")
-            dummy_data = pd.DataFrame({
-                "종목코드": ["7203", "9984", "6758"],
-                "종목명": ["토요타자동차", "소프트뱅크그룹", "소니그룹"],
-                "현재가": ["3,500 엔", "8,900 엔", "12,400 엔"],
-                "거래대금(엔)": ["1500억", "2100억", "980억"]
-            })
-            st.dataframe(dummy_data, use_container_width=True, hide_index=True)
+            st.success(f"분석 완료! 총 {len(result_df)}개의 종목이 검색되었습니다.")
+            st.dataframe(result_df, use_container_width=True, hide_index=True)
